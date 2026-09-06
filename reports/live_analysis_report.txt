@@ -1,0 +1,35 @@
+
+================================================================================
+                           RSI ANALYSIS REPORT
+                     Aditya Birla Real Estate Limited (ABREL.NS)
+================================================================================
+
+Current RSI: 47.25
+
+RSI Zone: Weak-to-Neutral (40-50)
+
+RSI Direction: Falling
+
+Momentum: Neutral
+
+RSI Structure: Mixed / Sideways Structure
+
+Divergence: None
+
+50-Level Status: Below 50
+
+30-Level Status: Above 30
+
+70-Level Status: Below 70
+
+Trend Interpretation: Bearish Downtrend
+
+RSI Signal Strength: STRONG
+
+Final RSI-Based Decision:
+HOLD / WAIT
+
+Reason: Multi-Agent AI Model (XGBoost + PyTorch Deep LSTM) evaluated market data for Aditya Birla Real Estate Limited. Ensemble probabilities — BUY: 17.2%, HOLD: 62.4%, SELL: 20.4%. RSI 14 is currently 47.25 (Weak-to-Neutral (40-50)), direction is Falling. 50-level status: Below 50, Divergence: None.
+
+Risk Warning: RSI is a momentum oscillator and quantitative ML predictions are based on historical probability distributions. Neither guarantees future price movement. Always perform proper risk management and position sizing.
+================================================================================
