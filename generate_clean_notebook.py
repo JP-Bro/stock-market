@@ -257,7 +257,8 @@ cell9 = nbf.v4.new_code_cell(cell9_code)
 
 nb['cells'] = [cell1, cell2, cell3, cell4, cell5, cell6, cell7, cell8, cell9]
 
-target_file = r"C:\Users\BhansaLi\Desktop\Multi_Agent\rsi_trading_experiment.ipynb"
+import os
+target_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rsi_trading_experiment.ipynb")
 with open(target_file, "w", encoding="utf-8") as f:
     nbf.write(nb, f)
 

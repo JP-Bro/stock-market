@@ -1,0 +1,36 @@
+
+================================================================================
+                           RSI ANALYSIS REPORT
+                      NVIDIA Corporation (NVDA)
+================================================================================
+
+Current RSI: 55.30
+
+RSI Zone: Moderately Bullish (50-60)
+
+RSI Direction: Sideways
+
+Momentum: Bullish
+
+RSI Structure: Higher Highs / Rising Structure
+
+Divergence: None
+
+50-Level Status: Above 50
+
+30-Level Status: Above 30
+
+70-Level Status: Below 70
+
+Trend Interpretation: Bullish Uptrend (Supported by EMA 50 > EMA 200)
+
+RSI Signal Strength: WEAK / NO SURETY
+
+Final Decision:
+HOLD CASH / NO HIGH-SURETY SETUP
+
+Reason: Multi-Agent AI Pipeline (Technical XGBoost + PyTorch Deep LSTM + Sentiment Agent + Arbitrator) evaluated market data for NVIDIA Corporation. Blended Ensemble probabilities — BUY: 41.0%, HOLD: 24.2%, SELL: 34.8%. RSI 14 is currently 55.30 (Moderately Bullish (50-60)), direction is Sideways. 50-level status: Above 50, Divergence: None.
+News Sentiment: NEUTRAL / BALANCED (Score: 0.051) across 10 recent articles.
+
+Risk Warning: Quantitative predictions, sentiment analysis, and candlestick setups are based on historical probability distributions. None guarantees future price movement. Always perform proper position sizing and risk management with the Triple Barrier stop-loss.
+================================================================================

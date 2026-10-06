@@ -1,6 +1,5 @@
 import xgboost as xgb
 import numpy as np
-from sklearn.utils.class_weight import compute_sample_weight
 from sklearn.metrics import f1_score
 import config
 
@@ -16,51 +15,51 @@ class QuantXGBoostModel:
             'gamma': 0.1,
             'reg_alpha': 0.1,
             'reg_lambda': 1.0,
-            'min_child_weight': 1
+            'min_child_weight': 2
         }
         self.model = None
 
     def fit(self, X_train, y_train, X_val=None, y_val=None):
-        sample_weights = compute_sample_weight('balanced', y_train)
+        # Apply smooth square-root class balancing to prevent extreme 15x weight distortions
+        classes, counts = np.unique(y_train, return_counts=True)
+        total = len(y_train)
+        weights_dict = {c: np.sqrt(total / (len(classes) * count)) for c, count in zip(classes, counts)}
+        sample_weights = np.array([weights_dict[y] for y in y_train])
 
         if self.tune_params and X_val is not None and y_val is not None:
             print("[XGBoost] Hyperparameter tuning in progress...")
             best_score = -1.0
             
             # Grid search candidates
-            depth_list = [3, 4, 5]
-            lr_list = [0.01, 0.03, 0.05]
-            est_list = [150, 250, 350]
-            mcw_list = [1, 3]
+            depth_list = [3, 4]
+            lr_list = [0.02, 0.04]
+            est_list = [150, 220]
 
             for d in depth_list:
                 for lr in lr_list:
                     for n_est in est_list:
-                        for mcw in mcw_list:
-                            clf = xgb.XGBClassifier(
-                                n_estimators=n_est,
-                                max_depth=d,
-                                learning_rate=lr,
-                                min_child_weight=mcw,
-                                subsample=0.8,
-                                colsample_bytree=0.8,
-                                gamma=0.1,
-                                reg_alpha=0.1,
-                                reg_lambda=1.0,
-                                random_state=config.RANDOM_SEED
-                            )
-                            clf.fit(X_train, y_train, sample_weight=sample_weights, verbose=False)
-                            val_preds = clf.predict(X_val)
-                            score = f1_score(y_val, val_preds, average='macro')
-                            
-                            if score > best_score:
-                                best_score = score
-                                self.best_params.update({
-                                    'n_estimators': n_est,
-                                    'max_depth': d,
-                                    'learning_rate': lr,
-                                    'min_child_weight': mcw
-                                })
+                        clf = xgb.XGBClassifier(
+                            n_estimators=n_est,
+                            max_depth=d,
+                            learning_rate=lr,
+                            subsample=0.8,
+                            colsample_bytree=0.8,
+                            gamma=0.1,
+                            reg_alpha=0.1,
+                            reg_lambda=1.0,
+                            random_state=config.RANDOM_SEED
+                        )
+                        clf.fit(X_train, y_train, sample_weight=sample_weights, verbose=False)
+                        val_preds = clf.predict(X_val)
+                        score = f1_score(y_val, val_preds, average='macro')
+                        
+                        if score > best_score:
+                            best_score = score
+                            self.best_params.update({
+                                'n_estimators': n_est,
+                                'max_depth': d,
+                                'learning_rate': lr
+                            })
             print(f"[XGBoost] Optimal parameters found: {self.best_params} (Validation Macro F1: {best_score:.4f})")
 
         self.model = xgb.XGBClassifier(

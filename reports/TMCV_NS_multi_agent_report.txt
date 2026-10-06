@@ -1,0 +1,36 @@
+
+================================================================================
+                           RSI ANALYSIS REPORT
+                      Tata Motors Limited (TMCV) (TMCV.NS)
+================================================================================
+
+Current RSI: 47.27
+
+RSI Zone: Weak-to-Neutral (40-50)
+
+RSI Direction: Rising
+
+Momentum: Neutral
+
+RSI Structure: Higher Highs / Rising Structure
+
+Divergence: None
+
+50-Level Status: Below 50
+
+30-Level Status: Above 30
+
+70-Level Status: Below 70
+
+Trend Interpretation: Sideways / Transition
+
+RSI Signal Strength: MODERATE / HOLD CASH
+
+Final Decision:
+MODERATE SELL / REDUCE
+
+Reason: Multi-Agent AI Pipeline (Technical XGBoost + PyTorch Deep LSTM + Sentiment Agent + Arbitrator) evaluated market data for Tata Motors Limited (TMCV). Blended Ensemble probabilities — BUY: 32.1%, HOLD: 23.9%, SELL: 44.0%. RSI 14 is currently 47.27 (Weak-to-Neutral (40-50)), direction is Rising. 50-level status: Below 50, Divergence: None.
+News Sentiment: NEUTRAL / BALANCED (Score: -0.066) across 10 recent articles.
+
+Risk Warning: Quantitative predictions, sentiment analysis, and candlestick setups are based on historical probability distributions. None guarantees future price movement. Always perform proper position sizing and risk management with the Triple Barrier stop-loss.
+================================================================================

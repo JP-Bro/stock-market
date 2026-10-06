@@ -1,10 +1,10 @@
 
 ================================================================================
                            RSI ANALYSIS REPORT
-                     Aditya Birla Real Estate Limited (ABREL.NS)
+                     Tata Motors Limited (TMCV) (TMCV.NS)
 ================================================================================
 
-Current RSI: 47.25
+Current RSI: 48.98
 
 RSI Zone: Weak-to-Neutral (40-50)
 
@@ -12,24 +12,24 @@ RSI Direction: Falling
 
 Momentum: Neutral
 
-RSI Structure: Mixed / Sideways Structure
+RSI Structure: Lower Highs (Weakening Structure)
 
 Divergence: None
 
-50-Level Status: Below 50
+50-Level Status: Crossing downward
 
 30-Level Status: Above 30
 
 70-Level Status: Below 70
 
-Trend Interpretation: Bearish Downtrend
+Trend Interpretation: Sideways / Transition
 
-RSI Signal Strength: STRONG
+RSI Signal Strength: WEAK / NO SURETY
 
-Final RSI-Based Decision:
-HOLD / WAIT
+Final Decision:
+HOLD CASH / NO HIGH SURETY SETUP
 
-Reason: Multi-Agent AI Model (XGBoost + PyTorch Deep LSTM) evaluated market data for Aditya Birla Real Estate Limited. Ensemble probabilities — BUY: 17.2%, HOLD: 62.4%, SELL: 20.4%. RSI 14 is currently 47.25 (Weak-to-Neutral (40-50)), direction is Falling. 50-level status: Below 50, Divergence: None.
+Reason: Multi-Agent AI Model (XGBoost + PyTorch Deep LSTM) evaluated market data for Tata Motors Limited (TMCV). Triple Barrier Ensemble probabilities — BUY: 25.5%, HOLD: 33.4%, SELL: 41.1%. RSI 14 is currently 48.98 (Weak-to-Neutral (40-50)), direction is Falling. 50-level status: Crossing downward, Divergence: None.
 
-Risk Warning: RSI is a momentum oscillator and quantitative ML predictions are based on historical probability distributions. Neither guarantees future price movement. Always perform proper risk management and position sizing.
+Risk Warning: Quantitative predictions and candlestick setups are based on historical probability distributions. Neither guarantees future price movement. Always perform proper position sizing and risk management with the Triple Barrier stop-loss.
 ================================================================================

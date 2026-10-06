@@ -3,261 +3,288 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from sklearn.preprocessing import StandardScaler
-import torch
-import yfinance as yf
+import os
 
 import config
-from feature_engineering import engineer_quant_rsi_features, FEATURE_COLUMNS
-from labeler import create_quant_target_labels
-from models.xgboost_model import QuantXGBoostModel
-from models.deep_lstm import QuantDeepLSTMModel, create_sequences
-from models.ensemble import HybridEnsembleModel
-from predictor import generate_section30_report, evaluate_all_strategies
+from multi_agent_pipeline import MultiAgentPipeline
+from predictor import evaluate_all_strategies, generate_section30_report
 
-# Page Config
+# Streamlit Page Config
 st.set_page_config(
-    page_title="Multi-Asset Quant AI Trading Dashboard",
-    page_icon="📈",
+    page_title="Multi-Agent AI Quant Trading & Sentiment Platform",
+    page_icon="🤖",
     layout="wide"
 )
 
 # Custom Styling
 st.markdown("""
 <style>
-    .main-title { font-size: 28px; font-weight: bold; margin-bottom: 5px; }
-    .subtitle { color: #6c757d; font-size: 14px; margin-bottom: 20px; }
-    .badge-buy { background-color: #28a745; color: white; padding: 12px 20px; border-radius: 8px; font-size: 22px; font-weight: bold; text-align: center; }
-    .badge-sell { background-color: #dc3545; color: white; padding: 12px 20px; border-radius: 8px; font-size: 22px; font-weight: bold; text-align: center; }
-    .badge-hold { background-color: #ffc107; color: black; padding: 12px 20px; border-radius: 8px; font-size: 22px; font-weight: bold; text-align: center; }
-    .badge-wait { background-color: #6c757d; color: white; padding: 12px 20px; border-radius: 8px; font-size: 22px; font-weight: bold; text-align: center; }
-    .card-box { background-color: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 5px solid #007bff; margin-bottom: 15px; }
+    .main-title { font-size: 30px; font-weight: 800; color: #1e293b; margin-bottom: 2px; }
+    .subtitle { color: #64748b; font-size: 15px; margin-bottom: 20px; }
+    .agent-card { background: #f8fafc; border-radius: 12px; padding: 18px; border: 1px solid #e2e8f0; margin-bottom: 15px; }
+    .badge-buy { background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 12px 18px; border-radius: 10px; font-size: 20px; font-weight: bold; text-align: center; }
+    .badge-sell { background: linear-gradient(135deg, #ef4444, #dc2626); color: white; padding: 12px 18px; border-radius: 10px; font-size: 20px; font-weight: bold; text-align: center; }
+    .badge-hold { background: linear-gradient(135deg, #f59e0b, #d97706); color: white; padding: 12px 18px; border-radius: 10px; font-size: 20px; font-weight: bold; text-align: center; }
+    .news-card { background: white; border-radius: 8px; padding: 12px; border-left: 4px solid #3b82f6; margin-bottom: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .news-bullish { border-left-color: #10b981 !important; }
+    .news-bearish { border-left-color: #ef4444 !important; }
+    .news-neutral { border-left-color: #94a3b8 !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# Sidebar Asset Selection
-st.sidebar.header("🎯 Stock & Asset Selection")
-ASSET_OPTIONS = {
-    "Tata Steel Ltd. (TATASTEEL.NS)": ("TATASTEEL.NS", "Tata Steel Ltd.", "₹"),
-    "Reliance Industries Ltd. (RELIANCE.NS)": ("RELIANCE.NS", "Reliance Industries Ltd.", "₹"),
-    "JPMorgan Chase & Co. (JPM)": ("JPM", "JPMorgan Chase & Co.", "$"),
-    "IDFC First Bank Ltd. (IDFCFIRSTB.NS)": ("IDFCFIRSTB.NS", "IDFC First Bank Ltd.", "₹"),
-    "Aditya Birla Real Estate Ltd. (ABREL.NS)": ("ABREL.NS", "Aditya Birla Real Estate Ltd.", "₹"),
-    "Aditya Birla Capital Ltd. (ABCAPITAL.NS)": ("ABCAPITAL.NS", "Aditya Birla Capital Ltd.", "₹")
-}
+# Sidebar Asset & Engine Selection
+st.sidebar.header("🎯 Stock & Market Selection")
 
-selected_asset_label = st.sidebar.selectbox("Choose Stock to Analyze", list(ASSET_OPTIONS.keys()), index=0)
-selected_ticker, selected_name, curr_symbol = ASSET_OPTIONS[selected_asset_label]
+asset_catalog = config.SUPPORTED_ASSETS
+catalog_options = [f"{sym} — {meta['name']} ({meta.get('sector', '')})" for sym, meta in asset_catalog.items()]
+catalog_options.insert(0, "✨ Custom Ticker Input...")
 
-days_lookback = st.sidebar.slider("Display Window (Days)", min_value=30, max_value=365, value=120)
+selected_option = st.sidebar.selectbox("Select Asset from Universe", catalog_options, index=1)
 
-st.markdown(f"<div class='main-title'>📈 Multi-Strategy Quant AI — {selected_name} ({selected_ticker})</div>", unsafe_allow_html=True)
-st.markdown("<div class='subtitle'>Empirical Candlestick Strategies, Multi-Pattern Confluence & AI Neural Ensemble</div>", unsafe_allow_html=True)
+if selected_option == "✨ Custom Ticker Input...":
+    custom_sym = st.sidebar.text_input("Enter Yahoo Finance Ticker Symbol", value="TMCV.NS", help="Examples: TMCV.NS, RELIANCE.NS, AAPL, NVDA, TSLA, MSFT")
+    custom_name = st.sidebar.text_input("Company / Asset Name", value="Custom Asset")
+    selected_ticker = custom_sym.strip()
+    selected_name = custom_name.strip()
+    curr_symbol = "₹" if ".NS" in selected_ticker or ".BO" in selected_ticker else "$"
+else:
+    selected_ticker = selected_option.split(" — ")[0]
+    meta = asset_catalog[selected_ticker]
+    selected_name = meta["name"]
+    curr_symbol = meta.get("currency", "₹")
 
-@st.cache_resource(ttl=1800)
-def train_and_get_ai_models_for_ticker(ticker_symbol):
-    """
-    Trains the XGBoost and PyTorch Deep LSTM models dynamically on historical data for ticker_symbol.
-    """
-    df_raw = yf.download(ticker_symbol, start=config.START_DATE, progress=False)
-    if isinstance(df_raw.columns, pd.MultiIndex):
-        df_raw = df_raw.xs(ticker_symbol, level=1, axis=1)
-    df_raw = df_raw.dropna().copy()
-    
-    df_feat = engineer_quant_rsi_features(df_raw)
-    target = create_quant_target_labels(df_feat)
-    df_feat['target'] = target
-    
-    label_map = {-1: 0, 0: 1, 1: 2}
-    df_feat['target_mapped'] = df_feat['target'].map(label_map)
-    df_clean = df_feat.dropna().copy()
-    
-    X = df_clean[FEATURE_COLUMNS].values
-    y = df_clean['target_mapped'].values
-    
-    n = len(df_clean)
-    train_end = int(n * config.TRAIN_RATIO)
-    val_end = int(n * (config.TRAIN_RATIO + config.VAL_RATIO))
-    
-    X_train, y_train = X[:train_end], y[:train_end]
-    X_val, y_val = X[train_end:val_end], y[train_end:val_end]
-    
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_val_scaled = scaler.transform(X_val)
-    
-    # Train XGBoost
-    xgb_model = QuantXGBoostModel()
-    xgb_model.fit(X_train_scaled, y_train, X_val_scaled, y_val)
-    
-    # Train PyTorch LSTM
-    seq_len = config.SEQ_LEN
-    X_train_seq, y_train_seq = create_sequences(X_train_scaled, y_train, seq_len)
-    lstm_model = QuantDeepLSTMModel(input_dim=len(FEATURE_COLUMNS))
-    lstm_model.fit(X_train_seq, y_train_seq, epochs=30)
-    
-    ensemble = HybridEnsembleModel(xgb_weight=0.5, lstm_weight=0.5)
-    
-    return df_clean, scaler, xgb_model, lstm_model, ensemble
+st.sidebar.markdown("---")
+st.sidebar.header("⚡ Engine Configuration")
+turbo_mode = st.sidebar.checkbox("🚀 Turbo Mode (High Speed Execution)", value=True, help="Accelerates model convergence, optimizes tree estimators, and utilizes fast-path caching.")
+days_lookback = st.sidebar.slider("Display Window (Trading Days)", min_value=30, max_value=365, value=120)
 
-with st.spinner(f"Fetching live data & training AI Ensemble for {selected_name} ({selected_ticker})..."):
-    df_clean, scaler, xgb_model, lstm_model, ensemble = train_and_get_ai_models_for_ticker(selected_ticker)
+# Main Title Banner
+st.markdown(f"<div class='main-title'>🤖 Multi-Agent Quant AI Portfolio — {selected_name}</div>", unsafe_allow_html=True)
+st.markdown(f"<div class='subtitle'>Ticker: <code>{selected_ticker}</code> | Architecture: Technical Agent + Sentiment Agent + Arbitrator Agent</div>", unsafe_allow_html=True)
 
-# Compute Live Inference using trained AI ensemble
-X_all_scaled = scaler.transform(df_clean[FEATURE_COLUMNS].values)
-latest_X = X_all_scaled[-1:]
+@st.cache_resource(ttl=900)
+def execute_pipeline(ticker, name, turbo):
+    pipeline = MultiAgentPipeline(ticker=ticker, asset_name=name, turbo_mode=turbo)
+    return pipeline.run_pipeline()
 
-seq_len = config.SEQ_LEN
-X_all_seq = []
-for i in range(len(X_all_scaled) - seq_len, len(X_all_scaled)):
-    X_all_seq.append(X_all_scaled[i-seq_len:i])
-X_all_seq_tensor = torch.tensor(np.array(X_all_seq), dtype=torch.float32)
-latest_X_seq = X_all_seq_tensor[-1:]
+with st.spinner(f"Running Multi-Agent AI Pipeline for {selected_name} ({selected_ticker})..."):
+    try:
+        pipeline_data = execute_pipeline(selected_ticker, selected_name, turbo_mode)
+    except Exception as e:
+        st.error(f"Failed to execute pipeline for {selected_ticker}: {e}")
+        st.stop()
 
-p_xgb = xgb_model.predict_proba(latest_X)[0]
-p_lstm = lstm_model.predict_proba(latest_X_seq)[0]
-p_ens = ensemble.predict_proba(np.array([p_xgb]), np.array([p_lstm]))[0]
+tech_agent = pipeline_data['technical_agent']
+sent_agent = pipeline_data['sentiment_agent']
+arb_agent = pipeline_data['arbitrator_agent']
+df_clean = pipeline_data['df_clean']
 
-pred_class = ensemble.predict_with_thresholds(np.array([p_ens]), 0.38, 0.38)[0]
-decision_map = {0: ("SELL / REDUCE", "badge-sell"), 1: ("HOLD / WAIT", "badge-hold"), 2: ("BUY / ACCUMULATE", "badge-buy")}
-decision_str, badge_class = decision_map[pred_class]
+# Top Decision Banner
+col_dec, col_p, col_rsi, col_sent = st.columns([2, 1.3, 1.3, 1.4])
 
-latest = df_clean.iloc[-1]
-rsi_val = float(latest['rsi_14'])
-close_val = float(latest['Close'])
-rsi_diff1 = float(latest['rsi_diff1'])
+sig_code = arb_agent['signal_code']
+badge_cls = "badge-buy" if sig_code == 2 else ("badge-sell" if sig_code == 0 else "badge-hold")
 
-# Evaluate All Strategies
-df_strategies = evaluate_all_strategies(df_clean, p_ens)
+with col_dec:
+    st.markdown("**ARBITRATED PORTFOLIO DECISION**")
+    st.markdown(f"<div class='{badge_cls}'>{arb_agent['final_signal']}</div>", unsafe_allow_html=True)
+    st.caption(f"Surety: {arb_agent['surety_level']}")
 
-# Top Banner Summary Metrics
-col1, col2, col3, col4 = st.columns([2, 1.5, 1.5, 1.5])
-with col1:
-    st.markdown(f"**AI MODEL DECISION**")
-    st.markdown(f"<div class='{badge_class}'>{decision_str}</div>", unsafe_allow_html=True)
-with col2:
-    st.metric("Latest Close Price", f"{curr_symbol}{close_val:.2f}", f"{latest['Close'] - df_clean.iloc[-2]['Close']:.2f}")
-with col3:
-    st.metric("Current RSI (14)", f"{rsi_val:.2f}", f"{rsi_diff1:+.2f}")
-with col4:
-    st.metric("AI Probabilities", f"BUY: {p_ens[2]*100:.0f}%", f"SELL: {p_ens[0]*100:.0f}% | HOLD: {p_ens[1]*100:.0f}%")
+with col_p:
+    latest_close = tech_agent['close_price']
+    prev_close = float(df_clean.iloc[-2]['Close']) if len(df_clean) >= 2 else latest_close
+    delta_p = latest_close - prev_close
+    st.metric("Latest Close", f"{curr_symbol}{latest_close:.2f}", f"{delta_p:+.2f}")
+
+with col_rsi:
+    rsi_v = tech_agent['rsi_14']
+    st.metric("RSI (14 Momentum)", f"{rsi_v:.2f}", f"{'Oversold' if rsi_v < 30 else ('Overbought' if rsi_v > 70 else 'Neutral Zone')}")
+
+with col_sent:
+    s_score = sent_agent['sentiment_score']
+    st.metric("News Sentiment Score", f"{s_score:+.2f}", f"{sent_agent['sentiment_label']}")
 
 st.markdown("---")
 
 # Main Multi-Section Tabs
-tab1, tab2, tab3 = st.tabs([
-    "📊 Section 1: Multi-Strategy Predictions & Win Rates",
-    "📈 Section 2: Interactive Chart & Technical Indicators",
-    "🧠 Section 3: Quantitative AI Diagnosis & Backtest"
+tab_agents, tab_patterns, tab_news, tab_charts, tab_backtest, tab_report = st.tabs([
+    "🤖 Agent Pipeline Architecture",
+    "🕯️ Pattern Confluence & Signals",
+    "📰 Live News & NLP Sentiment",
+    "📈 Interactive Technical Charts",
+    "📊 Institutional Backtest",
+    "📄 Section 30 Diagnostic Report"
 ])
 
-with tab1:
-    st.subheader(f"Verified Candlestick & ML Strategy Breakdown — {selected_name}")
+with tab_agents:
+    st.subheader("Multi-Agent System Workflow & Consensus")
     st.markdown("""
-    This section evaluates live market data across **empirical candlestick patterns** (backtested on multi-decade market data) 
-    alongside the **Multi-Agent XGBoost + PyTorch Neural Ensemble**.
+    This quantitative trading system operates through three specialized AI agents working in synchronization:
     """)
     
-    # Render Strategy Comparison Table
+    c1, c2, c3 = st.columns(3)
+    
+    with c1:
+        st.markdown(f"""
+        <div class='agent-card'>
+            <h4>⚙️ Agent 1: Technical & Pattern Agent</h4>
+            <p><b>Model Verdict:</b> <code>{tech_agent['decision']}</code></p>
+            <p><b>XGBoost Prob:</b> BUY {tech_agent['p_xgb'][2]*100:.1f}% | SELL {tech_agent['p_xgb'][0]*100:.1f}%</p>
+            <p><b>Deep LSTM Prob:</b> BUY {tech_agent['p_lstm'][2]*100:.1f}% | SELL {tech_agent['p_lstm'][0]*100:.1f}%</p>
+            <p><b>Patterns Detected:</b> {len(tech_agent['patterns_detected'])} active setups</p>
+            <p><b>EMA Location Filter:</b> {'✅ Valid' if tech_agent['location_pass'] else '❌ Outside Band'}</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+    with c2:
+        st.markdown(f"""
+        <div class='agent-card'>
+            <h4>📰 Agent 2: News & Sentiment Agent</h4>
+            <p><b>Sentiment Stance:</b> <code>{sent_agent['sentiment_label']}</code></p>
+            <p><b>Sentiment Score:</b> {sent_agent['sentiment_score']:+.3f} (-1 to +1)</p>
+            <p><b>Articles Analyzed:</b> {sent_agent['news_count']} live sources</p>
+            <p><b>Bullish / Bearish Ratio:</b> {sent_agent['bullish_articles']} Bullish / {sent_agent['bearish_articles']} Bearish</p>
+            <p><b>News Momentum:</b> {'High Velocity' if sent_agent['news_count'] >= 5 else 'Moderate Flow'}</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+    with c3:
+        ep = arb_agent['execution_plan']
+        st.markdown(f"""
+        <div class='agent-card'>
+            <h4>⚖️ Agent 3: Arbitrator & Fusion Agent</h4>
+            <p><b>Arbitrated Action:</b> <code>{arb_agent['final_signal']}</code></p>
+            <p><b>Recommended Sizing:</b> {ep['recommended_allocation']}</p>
+            <p><b>Target 1 (1.0x Vol):</b> {curr_symbol}{ep['profit_target_1']}</p>
+            <p><b>Target 2 (1.5x Vol):</b> {curr_symbol}{ep['profit_target_2']}</p>
+            <p><b>Stop Loss (-1.0x Vol):</b> {curr_symbol}{ep['stop_loss_level']}</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+    st.subheader("Arbitrator Deliberation Notes & Risk Analysis")
+    for note in arb_agent['arbitrator_notes']:
+        st.info(note)
+
+with tab_patterns:
+    st.subheader(f"Empirical Candlestick & Chart Pattern Scanner — {selected_name}")
+    
+    df_strategies = evaluate_all_strategies(df_clean, tech_agent['p_technical'], asset_name=selected_name)
     st.dataframe(
         df_strategies,
         column_config={
             "Strategy Name": st.column_config.TextColumn("Strategy Name", width="medium"),
             "True Win Rate / Accuracy": st.column_config.TextColumn("Empirical Win Rate", width="small"),
             "Risk / Reward Ratio": st.column_config.TextColumn("Risk / Reward", width="small"),
-            "Current Signal": st.column_config.TextColumn("Live Prediction Signal", width="medium"),
-            "Action Plan": st.column_config.TextColumn("Execution Verdict & Action Plan", width="large")
+            "Current Signal": st.column_config.TextColumn("Live Pattern Signal", width="medium"),
+            "Action Plan": st.column_config.TextColumn("Execution Protocol", width="large")
         },
         use_container_width=True,
         hide_index=True
     )
     
-    st.markdown("---")
-    st.subheader("Strategy Blueprint & Validation Rules")
+    if tech_agent['patterns_detected']:
+        st.markdown("### 🔥 Active Patterns Detected Today")
+        for p in tech_agent['patterns_detected']:
+            st.success(f"**{p['name']}**: {p['signal']} Signal (Win Rate: {p['win_rate']}) — {p['action']}")
+    else:
+        st.warning("No standalone single-candle patterns active on today's closing bar. ML ensemble and multi-timeframe structure are utilized.")
+
+with tab_news:
+    st.subheader(f"Real-Time Financial News & NLP Sentiment Feed — {selected_name}")
+    st.markdown(f"**Aggregate NLP Sentiment Score:** `{sent_agent['sentiment_score']:+.3f}` | **Status:** `{sent_agent['sentiment_label']}`")
     
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.markdown("""
-        <div class='card-box'>
-        <h4>✅ High-Probability Execution Rules</h4>
-        <ul>
-            <li><b>Rule 1: Location Filter:</b> Trade setups only when formed within 3% of EMA 20, EMA 50, or EMA 200 key moving averages.</li>
-            <li><b>Rule 2: Volume Expansion:</b> Reversal candles must be backed by volume &ge; 20-period Volume SMA.</li>
-            <li><b>Rule 3: Multi-Pattern Confluence:</b> Never trade single candles in isolation; require agreement across ML & candlestick patterns.</li>
-        </ul>
-        </div>
-        """, unsafe_allow_html=True)
+    for art in sent_agent['articles']:
+        lbl = art['label']
+        cls_name = "news-bullish" if lbl == "BULLISH" else ("news-bearish" if lbl == "BEARISH" else "news-neutral")
+        badge_emoji = "🟢" if lbl == "BULLISH" else ("🔴" if lbl == "BEARISH" else "⚪")
         
-    with col_b:
-        loc_status = "✅ PASS" if int(latest.get('location_filter_pass', 0)) == 1 else "❌ FAIL"
-        vol_status = "✅ PASS" if int(latest.get('volume_filter_pass', 0)) == 1 else "❌ FAIL"
+        keywords_str = f" | Keywords: {', '.join(art['matched_keywords'])}" if art.get('matched_keywords') else ""
         
         st.markdown(f"""
-        <div class='card-box'>
-        <h4>🔍 Current Validation Status</h4>
-        <p><b>Location Filter (Near EMA 20/50/200):</b> {loc_status}</p>
-        <p><b>Volume Expansion Filter:</b> {vol_status}</p>
-        <p><b>Confluence Signal:</b> {df_strategies.iloc[-1]['Current Signal']}</p>
+        <div class='news-card {cls_name}'>
+            <b>{badge_emoji} [{lbl} | Score: {art['sentiment_score']:+.2f}]</b> <a href="{art['link']}" target="_blank" style="text-decoration:none; color:#0f172a; font-weight:600;">{art['title']}</a>
+            <div style="font-size:12px; color:#64748b; margin-top:4px;">Source: {art['publisher']} • {art['timestamp']}{keywords_str}</div>
         </div>
         """, unsafe_allow_html=True)
 
-with tab2:
-    st.subheader(f"Live Price & RSI Indicator Chart — {selected_ticker}")
+with tab_charts:
+    st.subheader(f"Interactive Technical & Volatility Chart — {selected_ticker}")
     df_plot = df_clean.tail(days_lookback)
     
     fig = make_subplots(
-        rows=2, cols=1,
+        rows=3, cols=1,
         shared_xaxes=True,
-        vertical_spacing=0.08,
-        row_heights=[0.65, 0.35],
-        subplot_titles=(f"{selected_name} Price & Moving Averages", f"RSI (14) Momentum Indicator")
+        vertical_spacing=0.05,
+        row_heights=[0.55, 0.25, 0.20],
+        subplot_titles=(f"{selected_name} Price, EMAs & Bollinger Bands", "RSI (14) Momentum", "MACD Indicator")
     )
     
-    # Row 1: Price Chart & Moving Averages
-    fig.add_trace(
-        go.Scatter(x=df_plot.index, y=df_plot['Close'], name='Close Price', line=dict(color='#007bff', width=2)),
-        row=1, col=1
-    )
-    fig.add_trace(
-        go.Scatter(x=df_plot.index, y=df_plot['ema_20'], name='EMA 20', line=dict(color='#ffc107', width=1.5, dash='dash')),
-        row=1, col=1
-    )
-    fig.add_trace(
-        go.Scatter(x=df_plot.index, y=df_plot['ema_50'], name='EMA 50', line=dict(color='#dc3545', width=1.5, dash='dot')),
-        row=1, col=1
-    )
-    fig.add_trace(
-        go.Scatter(x=df_plot.index, y=df_plot['ema_200'], name='EMA 200', line=dict(color='#28a745', width=1.5)),
-        row=1, col=1
-    )
+    # Row 1: Price & Bands
+    fig.add_trace(go.Scatter(x=df_plot.index, y=df_plot['Close'], name='Close Price', line=dict(color='#0284c7', width=2)), row=1, col=1)
+    if 'bb_upper' in df_plot.columns:
+        fig.add_trace(go.Scatter(x=df_plot.index, y=df_plot['bb_upper'], name='Upper BB (20,2)', line=dict(color='#cbd5e1', width=1, dash='dot')), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df_plot.index, y=df_plot['bb_lower'], name='Lower BB (20,2)', line=dict(color='#cbd5e1', width=1, dash='dot'), fill='tonexty', fillcolor='rgba(241, 245, 249, 0.3)'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df_plot.index, y=df_plot['ema_20'], name='EMA 20', line=dict(color='#eab308', width=1.5)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df_plot.index, y=df_plot['ema_50'], name='EMA 50', line=dict(color='#f97316', width=1.5)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df_plot.index, y=df_plot['ema_200'], name='EMA 200', line=dict(color='#10b981', width=1.5)), row=1, col=1)
     
-    # Row 2: RSI Chart
-    fig.add_trace(
-        go.Scatter(x=df_plot.index, y=df_plot['rsi_14'], name='RSI 14', line=dict(color='#6f42c1', width=2)),
-        row=2, col=1
-    )
+    # Row 2: RSI
+    fig.add_trace(go.Scatter(x=df_plot.index, y=df_plot['rsi_14'], name='RSI 14', line=dict(color='#8b5cf6', width=2)), row=2, col=1)
+    fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
+    fig.add_hline(y=50, line_dash="dot", line_color="gray", row=2, col=1)
+    fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
     
-    fig.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="Overbought (70)", row=2, col=1)
-    fig.add_hline(y=50, line_dash="dot", line_color="gray", annotation_text="Midpoint (50)", row=2, col=1)
-    fig.add_hline(y=30, line_dash="dash", line_color="green", annotation_text="Oversold (30)", row=2, col=1)
-    
+    # Row 3: MACD
+    if 'macd_line' in df_plot.columns:
+        fig.add_trace(go.Scatter(x=df_plot.index, y=df_plot['macd_line'], name='MACD Line', line=dict(color='#3b82f6', width=1.5)), row=3, col=1)
+        fig.add_trace(go.Scatter(x=df_plot.index, y=df_plot['macd_signal'], name='Signal Line', line=dict(color='#ef4444', width=1.5)), row=3, col=1)
+        colors = ['#10b981' if val >= 0 else '#ef4444' for val in df_plot['macd_hist']]
+        fig.add_trace(go.Bar(x=df_plot.index, y=df_plot['macd_hist'], name='MACD Hist', marker_color=colors), row=3, col=1)
+        
     fig.update_layout(
-        height=550,
-        margin=dict(l=20, r=20, t=40, b=20),
+        height=700,
+        margin=dict(l=20, r=20, t=30, b=20),
         template="plotly_white",
         hovermode="x unified"
     )
     fig.update_yaxes(title_text=f"Price ({curr_symbol})", row=1, col=1)
-    fig.update_yaxes(title_text="RSI Value", range=[0, 100], row=2, col=1)
+    fig.update_yaxes(title_text="RSI", range=[0, 100], row=2, col=1)
+    fig.update_yaxes(title_text="MACD", row=3, col=1)
     
     st.plotly_chart(fig, use_container_width=True)
 
-with tab3:
-    st.subheader(f"Quantitative AI Model Diagnosis — {selected_name}")
+with tab_backtest:
+    st.subheader(f"Institutional Out-of-Sample Financial Backtest — {selected_name}")
+    bt = tech_agent['backtest_metrics']
     
-    report_text = generate_section30_report(df_clean, p_ens, decision_str)
-    st.text_area("Full Section 30 Output Report", report_text, height=350)
-    
-    st.subheader("AI Model Architecture & Weights")
-    st.write(f"• **XGBoost Classifier Weight:** 50.0% (Probabilities — BUY: {p_xgb[2]*100:.1f}%, HOLD: {p_xgb[1]*100:.1f}%, SELL: {p_xgb[0]*100:.1f}%)")
-    st.write(f"• **PyTorch Deep LSTM Weight:** 50.0% (Probabilities — BUY: {p_lstm[2]*100:.1f}%, HOLD: {p_lstm[1]*100:.1f}%, SELL: {p_lstm[0]*100:.1f}%)")
+    b1, b2, b3, b4 = st.columns(4)
+    with b1:
+        st.metric("Net Strategy Return", f"{bt['total_strategy_return']*100:.1f}%", f"Benchmark: {bt['total_benchmark_return']*100:.1f}%")
+        st.metric("Strategy CAGR", f"{bt['cagr_strategy']*100:.1f}%", f"Benchmark: {bt['cagr_benchmark']*100:.1f}%")
+    with b2:
+        st.metric("Annualized Sharpe Ratio", f"{bt['sharpe_ratio']:.2f}", "Risk-Free: 6.0%")
+        st.metric("Sortino Ratio", f"{bt['sortino_ratio']:.2f}", "Downside Deviations")
+    with b3:
+        st.metric("Profit Factor", f"{bt['profit_factor']:.2f}", "Gross Gains / Losses")
+        st.metric("Max Drawdown", f"{bt['max_drawdown']*100:.1f}%", "Peak-to-Trough")
+    with b4:
+        st.metric("Executed Trades", f"{bt['total_trades']}", f"Avg Duration: {bt['avg_hold_days']:.1f} Days")
+        st.metric("Frictions Deducted", f"{bt['cost_bps_applied']} bps", "Round-trip STT + Slippage")
+
+with tab_report:
+    st.subheader("Section 30 Quantitative AI Diagnosis Report")
+    report_text = generate_section30_report(
+        df_clean,
+        arb_agent['arbitrated_probs'],
+        arb_agent['final_signal'],
+        ticker=selected_ticker,
+        asset_name=selected_name,
+        sentiment_info=sent_agent
+    )
+    st.text_area("Full Diagnostic Report Content", report_text, height=400)
+    st.download_button(
+        label="📥 Download Diagnostic Report (.txt)",
+        data=report_text,
+        file_name=f"{selected_ticker}_multi_agent_report.txt",
+        mime="text/plain"
+    )

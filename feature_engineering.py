@@ -7,26 +7,27 @@ def compute_wilder_rsi(series, period=14):
     Computes Relative Strength Index (RSI) using Wilder's Smoothing.
     """
     delta = series.diff()
-    gain = (delta.where(delta > 0, 0)).copy()
-    loss = (-delta.where(delta < 0, 0)).copy()
+    gain = (delta.where(delta > 0, 0.0)).copy()
+    loss = (-delta.where(delta < 0, 0.0)).copy()
     
     avg_gain = gain.ewm(alpha=1/period, min_periods=period, adjust=False).mean()
     avg_loss = loss.ewm(alpha=1/period, min_periods=period, adjust=False).mean()
     
     rs = avg_gain / (avg_loss + 1e-10)
-    rsi = 100 - (100 / (1 + rs))
+    rsi = 100.0 - (100.0 / (1.0 + rs))
     return rsi
 
 def engineer_quant_rsi_features(df):
     """
-    Engineers advanced quant finance features combining RSI momentum, slope,
+    Engineers comprehensive quant finance features combining RSI momentum, slope,
     zones, crossings, structural peaks/troughs, divergence, volatility context,
-    and verified high-probability candlestick pattern strategies.
+    Bollinger Bands, MACD, and verified high-probability candlestick pattern strategies.
     """
     df = df.copy()
     close = df['Close']
     high = df['High']
     low = df['Low']
+    volume = df.get('Volume', pd.Series(1.0, index=df.index))
     
     # 1. Multi-Period RSIs
     df['rsi_14'] = compute_wilder_rsi(close, 14)
@@ -96,7 +97,22 @@ def engineer_quant_rsi_features(df):
     df['dist_ema_50'] = (close - df['ema_50']) / df['ema_50']
     df['trend_50_200'] = (df['ema_50'] > df['ema_200']).astype(int)
     
-    # 9. Volatility (ATR)
+    # 9. Bollinger Bands (%B & Bandwidth)
+    bb_sma20 = close.rolling(20).mean()
+    bb_std20 = close.rolling(20).std() + 1e-8
+    df['bb_upper'] = bb_sma20 + (2.0 * bb_std20)
+    df['bb_lower'] = bb_sma20 - (2.0 * bb_std20)
+    df['bb_pct_b'] = (close - df['bb_lower']) / (df['bb_upper'] - df['bb_lower'] + 1e-8)
+    df['bb_bandwidth'] = (df['bb_upper'] - df['bb_lower']) / bb_sma20
+    
+    # 10. MACD (Moving Average Convergence Divergence)
+    ema_12 = close.ewm(span=12, adjust=False).mean()
+    ema_26 = close.ewm(span=26, adjust=False).mean()
+    df['macd_line'] = ema_12 - ema_26
+    df['macd_signal'] = df['macd_line'].ewm(span=9, adjust=False).mean()
+    df['macd_hist'] = df['macd_line'] - df['macd_signal']
+    
+    # 11. Volatility (ATR & Historical Volatility)
     tr = pd.concat([
         high - low,
         (high - close.shift(1)).abs(),
@@ -104,8 +120,9 @@ def engineer_quant_rsi_features(df):
     ], axis=1).max(axis=1)
     df['atr_14'] = tr.ewm(span=14, adjust=False).mean()
     df['norm_atr'] = df['atr_14'] / close
+    df['hist_vol_20'] = close.pct_change().rolling(20).std() * np.sqrt(252.0)
     
-    # 10. Verified Candlestick Pattern Strategies Detection
+    # 12. Verified Candlestick Pattern Strategies Detection
     df = detect_candlestick_strategies(df)
     
     return df
@@ -115,7 +132,10 @@ FEATURE_COLUMNS = [
     'rsi_zscore_30', 'rsi_zscore_60', 'rsi_zone', 'cross_30_up', 'cross_50_up',
     'cross_70_down', 'cross_50_down', 'bullish_div', 'bearish_div', 'rsi_rel_pos_10',
     'rsi_higher_low', 'rsi_lower_high', 'bullish_failure_swing', 'bearish_failure_swing',
-    'dist_ema_20', 'dist_ema_50', 'trend_50_200', 'norm_atr',
+    'dist_ema_20', 'dist_ema_50', 'trend_50_200', 'norm_atr', 'bb_pct_b', 'bb_bandwidth',
+    'macd_line', 'macd_signal', 'macd_hist', 'hist_vol_20',
     'sig_three_line_strike', 'sig_three_soldiers_crows', 'sig_morning_evening_star',
-    'sig_abandoned_baby', 'sig_engulfing_baseline', 'location_filter_pass', 'volume_filter_pass'
+    'sig_abandoned_baby', 'sig_engulfing_baseline', 'sig_hammer_shooting_star',
+    'sig_piercing_dark_cloud', 'sig_marubozu', 'sig_double_top_bottom',
+    'location_filter_pass', 'volume_filter_pass'
 ]
